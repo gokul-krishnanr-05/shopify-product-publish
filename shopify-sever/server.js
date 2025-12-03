@@ -14,6 +14,8 @@ const HEADERS = {
     'Content-Type':'application/json',
     'X-Shopify-Access-Token':process.env.SHOPIFY_ACCESS_TOKEN
 }
+
+//fetching locations for quantity update
 app.get ('/api/location', async (req,res)=>{
     const query=`{
     locations(first:10){
@@ -40,7 +42,61 @@ catch(error){
 }
 }
 )
+//create new product to the store
+app.post('/api/create-product', async (req,res)=>{
+    const {productInput}=req.body
+const mutation = `
+mutation productSet($synchronous: Boolean!, $input: ProductSetInput!) {
+  productSet(synchronous: $synchronous, input: $input) {
+    product {
+      id
+      title
+      status:"DRAFT"
+      handle
+      totalVariants
+      variants(first: 10) {
+        nodes {
+          id
+          title
+          sku
+        }
+      }
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}
+`;
+try{
+    const response= await axios.post(SHOPIFY_API_URL,{query:mutation,variables:{
+        synchronous:true,input:productInput
+    }},
+    {headers:HEADERS}
+);
+if (response.data.errors) {
+      console.error("GRAPHQL ERROR:", response.data.errors);
+      return res.status(400).json({ success: false, errors: response.data.errors });
+    }
 
+    // ERROR CHECK 2: Data structure missing
+    if (!response.data.data || !response.data.data.productSet) {
+      return res.status(500).json({ success: false, error: "Shopify returned valid JSON but missing productSet data." });
+    }
+    const result = response.data.data.productSet;
+
+    // ERROR CHECK 3: User Errors (Logic errors, e.g., SKU taken)
+    if (result.userErrors && result.userErrors.length > 0) {
+      return res.status(400).json({ success: false, errors: result.userErrors });
+    }
+    res.json({ success: true, product: result.product });
+}
+catch (error) {
+    console.error("Network/Server Error:", error.response ? error.response.data : error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
 
 app.listen(process.env.PORT || 5000, () => {
   console.log(`Server running on port ${process.env.PORT || 5000}`);
